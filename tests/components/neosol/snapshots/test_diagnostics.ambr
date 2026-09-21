@@ -1,0 +1,22 @@
+# serializer version: 1
+# name: test_diagnostics
+  dict({
+    'channels': list([
+      dict({
+        'index': 0,
+        'sync': 43,
+      }),
+      dict({
+        'index': 1,
+        'sync': 14,
+      }),
+    ]),
+    'dongle': dict({
+      'frame_repeat': 'T0=25,T1=15,T2=70,T3=70',
+      'hardware_version': '0',
+      'read_protection': False,
+      'return_code_active': True,
+      'software_version': 'Rev10',
+    }),
+  })
+# ---
