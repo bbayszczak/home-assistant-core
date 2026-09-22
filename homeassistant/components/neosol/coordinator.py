@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, LOGGER
+from .const import CONF_IGNORED_CHANNELS, DOMAIN, LOGGER
 
 type NeosolConfigEntry = ConfigEntry[NeosolCoordinator]
 
@@ -83,4 +83,9 @@ class NeosolCoordinator(DataUpdateCoordinator[dict[int, Channel]]):
                 translation_placeholders={"error": str(err)},
             ) from err
 
-        return {channel.index: channel for channel in channels}
+        ignored = set(self.config_entry.options.get(CONF_IGNORED_CHANNELS, []))
+        return {
+            channel.index: channel
+            for channel in channels
+            if channel.index not in ignored
+        }

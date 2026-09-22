@@ -20,6 +20,12 @@ CHANNELS = [
     Channel(index=1, serial="000AAAA2", sync=14, key="FEDCBA9876543210"),
 ]
 
+# What AT$C? returns: the two paired channels, then factory-provisioned free ones.
+ALL_CHANNELS = CHANNELS + [
+    Channel(index=index, serial=f"000AAAA{index + 1}", sync=0, key="00112233445566AA")
+    for index in (2, 3)
+]
+
 
 @pytest.fixture(autouse=True)
 def mock_usb_component(hass: HomeAssistant) -> None:
@@ -55,6 +61,7 @@ def mock_dongle_class() -> Generator[MagicMock]:
             read_protection=False,
         )
         dongle.used_channels.return_value = list(CHANNELS)
+        dongle.channels.return_value = list(ALL_CHANNELS)
         yield dongle_class
 
 

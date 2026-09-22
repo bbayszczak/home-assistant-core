@@ -38,7 +38,8 @@ rules:
   config-entry-unloading: done
   docs-configuration-parameters:
     status: exempt
-    comment: This integration does not have an options flow.
+    comment: |
+      The options flow pairs a shutter; it stores no configuration parameter.
   docs-installation-parameters: done
   entity-unavailable: done
   integration-owner: done
@@ -80,12 +81,7 @@ rules:
     comment: |
       Nothing the user can act on can go wrong beyond the dongle being unplugged,
       which the config entry retry already reports.
-  stale-devices:
-    status: exempt
-    comment: |
-      Channels are provisioned at the factory and their usage counter never goes back
-      down, so a paired shutter never disappears from the dongle.
-
+  stale-devices: done
   # Platinum
   async-dependency: done
   inject-websession:

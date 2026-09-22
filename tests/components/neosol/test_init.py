@@ -7,13 +7,15 @@ from pyneosol import DongleNotFoundError, NotADongleError, ProtocolError, Transp
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
+from homeassistant.components.neosol import async_remove_config_entry_device
+from homeassistant.components.neosol.const import CONF_IGNORED_CHANNELS, DOMAIN
 from homeassistant.components.neosol.coordinator import SCAN_INTERVAL
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from . import setup_integration
+from . import MOCK_SERIAL, setup_integration
 
 from tests.common import MockConfigEntry, async_fire_time_changed
 
@@ -131,3 +133,52 @@ async def test_channel_table_error_keeps_the_entry(
     # The link is still up, so there is nothing a reload would fix.
     assert mock_dongle_class.open.call_count == 1
     assert hass.states.get("cover.shutter_0").state == STATE_UNAVAILABLE
+
+
+@pytest.mark.usefixtures("mock_dongle")
+async def test_the_dongle_cannot_be_removed(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the dongle device is not removable, since the entry owns it."""
+    await setup_integration(hass, mock_config_entry)
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, MOCK_SERIAL), mock_config_entry.entry_id
+    )
+
+    assert (
+        await async_remove_config_entry_device(hass, mock_config_entry, device) is False
+    )
+
+
+@pytest.mark.usefixtures("mock_dongle")
+async def test_a_removed_shutter_stays_away(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test a removed shutter is not brought back by the next refresh.
+
+    A pairing attempt that did not take leaves its channel looking paired, so removing
+    the shutter it created has to be remembered.
+    """
+    await setup_integration(hass, mock_config_entry)
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, f"{MOCK_SERIAL}_1"), mock_config_entry.entry_id
+    )
+
+    assert (
+        await async_remove_config_entry_device(hass, mock_config_entry, device) is True
+    )
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.options[CONF_IGNORED_CHANNELS] == [1]
+
+    freezer.tick(SCAN_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert 1 not in mock_config_entry.runtime_data.data
+    assert 0 in mock_config_entry.runtime_data.data

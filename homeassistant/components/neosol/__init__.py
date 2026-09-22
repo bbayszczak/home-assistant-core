@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, MANUFACTURER
+from .const import CONF_IGNORED_CHANNELS, DOMAIN, MANUFACTURER
 from .coordinator import NeosolConfigEntry, NeosolCoordinator, open_dongle
 
 PLATFORMS = [Platform.COVER]
@@ -49,6 +49,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: NeosolConfigEntry) -> bo
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: NeosolConfigEntry, device: dr.AnyDeviceEntry
+) -> bool:
+    """Let the user remove a shutter, but never the dongle itself.
+
+    The dongle counts a pairing attempt as a transmission, so an attempt that did not
+    take leaves its channel looking paired and produces a shutter that answers nothing.
+    Removing it has to be remembered, otherwise the next refresh would bring it back.
+    """
+    dongle = (DOMAIN, entry.runtime_data.info.serial_number)
+    if dongle in device.identifiers:
+        return False
+
+    # A shutter carries exactly one identifier, "<dongle serial>_<channel>".
+    _, identifier = next(iter(device.identifiers))
+    channel = int(identifier.rpartition("_")[2])
+
+    ignored = set(entry.options.get(CONF_IGNORED_CHANNELS, []))
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, CONF_IGNORED_CHANNELS: sorted(ignored | {channel})},
+    )
     return True
 
 
