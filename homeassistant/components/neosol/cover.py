@@ -8,12 +8,10 @@ from homeassistant.components.cover import (
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
-    CoverState,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN
 from .coordinator import NeosolConfigEntry
@@ -45,30 +43,19 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new_shutters))
 
 
-class NeosolCover(NeosolEntity, RestoreEntity, CoverEntity):
+class NeosolCover(NeosolEntity, CoverEntity):
     """A roller shutter driven by one channel of the dongle."""
 
     # The radio link is one way: a sent frame is never acknowledged and no position can
-    # be read back, so every state this entity reports is what the last command implied.
+    # be read back, so whether a shutter is open is simply unknown, and stays that way.
+    # Reporting what the last command implied would be a guess the shutter never
+    # confirmed, and a shutter driven from its own remote would make it wrong.
     _attr_assumed_state = True
     _attr_device_class = CoverDeviceClass.SHUTTER
-    # Nothing is known until a command has been sent, or an old state restored.
     _attr_is_closed: bool | None = None
     _attr_supported_features = (
         CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
     )
-
-    @override
-    async def async_added_to_hass(self) -> None:
-        """Restore the state assumed before the restart."""
-        await super().async_added_to_hass()
-
-        last_state = await self.async_get_last_state()
-        if last_state is not None and last_state.state in (
-            CoverState.OPEN,
-            CoverState.CLOSED,
-        ):
-            self._attr_is_closed = last_state.state == CoverState.CLOSED
 
     async def _async_send(self, action: Action) -> None:
         """Transmit ``action`` on this channel."""
@@ -88,20 +75,13 @@ class NeosolCover(NeosolEntity, RestoreEntity, CoverEntity):
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the shutter."""
         await self._async_send(Action.OPEN)
-        self._attr_is_closed = False
-        self.async_write_ha_state()
 
     @override
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the shutter."""
         await self._async_send(Action.CLOSE)
-        self._attr_is_closed = True
-        self.async_write_ha_state()
 
     @override
     async def async_stop_cover(self, **kwargs: Any) -> None:
-        """Stop the shutter mid-travel.
-
-        The position it stops at is unknown, so the assumed state is left untouched.
-        """
+        """Stop the shutter mid-travel."""
         await self._async_send(Action.STOP)

@@ -7,7 +7,7 @@ from pyneosol import Action, Channel, TransportError
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
-from homeassistant.components.cover import DOMAIN as COVER_DOMAIN, CoverState
+from homeassistant.components.cover import DOMAIN as COVER_DOMAIN
 from homeassistant.components.neosol.coordinator import SCAN_INTERVAL
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -15,21 +15,17 @@ from homeassistant.const import (
     SERVICE_OPEN_COVER,
     SERVICE_STOP_COVER,
     STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
     Platform,
 )
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
 from . import setup_integration
 from .conftest import CHANNELS
 
-from tests.common import (
-    MockConfigEntry,
-    async_fire_time_changed,
-    mock_restore_cache,
-    snapshot_platform,
-)
+from tests.common import MockConfigEntry, async_fire_time_changed, snapshot_platform
 
 ENTITY_ID = "cover.shutter_0"
 OTHER_ENTITY_ID = "cover.shutter_1"
@@ -50,11 +46,11 @@ async def test_entities(
 
 
 @pytest.mark.parametrize(
-    ("service", "action", "expected_state"),
+    ("service", "action"),
     [
-        pytest.param(SERVICE_OPEN_COVER, Action.OPEN, CoverState.OPEN, id="open"),
-        pytest.param(SERVICE_CLOSE_COVER, Action.CLOSE, CoverState.CLOSED, id="close"),
-        pytest.param(SERVICE_STOP_COVER, Action.STOP, CoverState.OPEN, id="stop"),
+        pytest.param(SERVICE_OPEN_COVER, Action.OPEN, id="open"),
+        pytest.param(SERVICE_CLOSE_COVER, Action.CLOSE, id="close"),
+        pytest.param(SERVICE_STOP_COVER, Action.STOP, id="stop"),
     ],
 )
 async def test_commands(
@@ -63,24 +59,17 @@ async def test_commands(
     mock_config_entry: MockConfigEntry,
     service: str,
     action: Action,
-    expected_state: str,
 ) -> None:
-    """Test each command transmits on the right channel.
-
-    The shutter is opened first, so that stopping has a state to leave untouched.
-    """
+    """Test each command transmits on the right channel and reports no state."""
     await setup_integration(hass, mock_config_entry)
-    await hass.services.async_call(
-        COVER_DOMAIN, SERVICE_OPEN_COVER, {ATTR_ENTITY_ID: ENTITY_ID}, blocking=True
-    )
-    mock_dongle.send.reset_mock()
 
     await hass.services.async_call(
         COVER_DOMAIN, service, {ATTR_ENTITY_ID: ENTITY_ID}, blocking=True
     )
 
     mock_dongle.send.assert_awaited_once_with(0, action)
-    assert hass.states.get(ENTITY_ID).state == expected_state
+    # The motors never answer, so no command may be turned into a state.
+    assert hass.states.get(ENTITY_ID).state == STATE_UNKNOWN
 
 
 async def test_command_failure(
@@ -96,18 +85,6 @@ async def test_command_failure(
         )
 
     assert err.value.translation_key == "send_failed"
-
-
-@pytest.mark.usefixtures("mock_dongle")
-async def test_restores_assumed_state(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry
-) -> None:
-    """Test the state assumed before a restart is restored."""
-    mock_restore_cache(hass, [State(ENTITY_ID, CoverState.CLOSED)])
-
-    await setup_integration(hass, mock_config_entry)
-
-    assert hass.states.get(ENTITY_ID).state == CoverState.CLOSED
 
 
 async def test_newly_paired_channel_is_added(
