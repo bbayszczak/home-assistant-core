@@ -69,11 +69,9 @@ class NeosolConfigFlow(ConfigFlow, domain=DOMAIN):
             port = await self.hass.async_add_executor_job(
                 usb.get_serial_by_id, user_input[CONF_DEVICE]
             )
-            self._async_abort_entries_match({CONF_DEVICE: port})
 
             if (error := await self._async_probe(port)) is None:
                 await self.async_set_unique_id(self._info.serial_number)
-                self._abort_if_unique_id_configured(updates={CONF_DEVICE: port})
                 return self.async_create_entry(title=TITLE, data={CONF_DEVICE: port})
 
             errors["base"] = error
@@ -92,7 +90,6 @@ class NeosolConfigFlow(ConfigFlow, domain=DOMAIN):
         port = await self.hass.async_add_executor_job(
             usb.get_serial_by_id, discovery_info.device
         )
-        self._async_abort_entries_match({CONF_DEVICE: port})
 
         # The USB vendor id belongs to Silicon Labs and is shared by unrelated serial
         # adapters, so only the AT&V answer tells a dongle from anything else.
@@ -100,8 +97,6 @@ class NeosolConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason=error)
 
         await self.async_set_unique_id(self._info.serial_number)
-        self._abort_if_unique_id_configured(updates={CONF_DEVICE: port})
-
         self._discovered_port = port
         self._set_confirm_only()
         return await self.async_step_usb_confirm()

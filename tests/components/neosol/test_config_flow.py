@@ -111,31 +111,31 @@ async def test_user_flow_errors(
 
 @pytest.mark.usefixtures("mock_dongle")
 @pytest.mark.parametrize(
-    ("port", "reason"),
+    ("source", "data"),
     [
-        pytest.param(MOCK_PORT, "already_configured", id="same-port"),
-        pytest.param(MOCK_OTHER_PORT, "already_configured", id="same-dongle-moved"),
+        pytest.param(SOURCE_USER, None, id="user"),
+        pytest.param(SOURCE_USB, USB_DISCOVERY_INFO, id="usb"),
     ],
 )
-async def test_user_flow_already_configured(
+async def test_only_one_entry_is_allowed(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    port: str,
-    reason: str,
+    source: str,
+    data: UsbServiceInfo | None,
 ) -> None:
-    """Test a dongle that is already set up aborts, updating the port if it moved."""
+    """Test a second dongle is refused, whatever starts the flow.
+
+    The integration takes a single config entry, so Home Assistant aborts before the
+    flow itself runs.
+    """
     mock_config_entry.add_to_hass(hass)
 
     result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_DEVICE: port}
+        DOMAIN, context={"source": source}, data=data
     )
 
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == reason
-    assert mock_config_entry.data[CONF_DEVICE] == port
+    assert result["reason"] == "single_instance_allowed"
 
 
 @pytest.mark.usefixtures("mock_dongle")
@@ -175,21 +175,6 @@ async def test_usb_discovery_probe_failure(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == reason
-
-
-@pytest.mark.usefixtures("mock_dongle")
-async def test_usb_discovery_already_configured(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry
-) -> None:
-    """Test replugging a configured dongle does not start a second flow."""
-    mock_config_entry.add_to_hass(hass)
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USB}, data=USB_DISCOVERY_INFO
-    )
-
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
 
 
 @pytest.mark.usefixtures("mock_dongle")

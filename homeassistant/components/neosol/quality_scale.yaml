@@ -53,7 +53,12 @@ rules:
   # Gold
   devices: done
   diagnostics: done
-  discovery-update-info: done
+  discovery-update-info:
+    status: exempt
+    comment: |
+      The integration takes a single config entry, so Home Assistant aborts a
+      rediscovery before the flow runs. The stored port is a /dev/serial/by-id path,
+      which survives a move to another USB port anyway.
   discovery: done
   docs-data-update: done
   docs-examples: done
