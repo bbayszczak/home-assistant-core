@@ -6,7 +6,7 @@ from typing import override
 from pyneosol import Channel, Dongle, DongleInfo, NeosolError, TransportError
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import CONF_IGNORED_CHANNELS, DOMAIN, LOGGER
@@ -55,6 +55,19 @@ class NeosolCoordinator(DataUpdateCoordinator[dict[int, Channel]]):
         )
         self.dongle = dongle
         self.info = info
+
+    @callback
+    def async_ignore_channel(self, channel: int) -> None:
+        """Keep ``channel`` out of the shutters from now on."""
+        entry = self.config_entry
+        ignored = set(entry.options.get(CONF_IGNORED_CHANNELS, []))
+        self.hass.config_entries.async_update_entry(
+            entry,
+            options={
+                **entry.options,
+                CONF_IGNORED_CHANNELS: sorted(ignored | {channel}),
+            },
+        )
 
     @override
     async def _async_update_data(self) -> dict[int, Channel]:

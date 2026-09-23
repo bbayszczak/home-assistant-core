@@ -2442,7 +2442,7 @@ pymysensors==0.26.0
 pynecil==4.2.1
 
 # homeassistant.components.neosol
-pyneosol==1.0.0
+pyneosol==1.1.0
 
 # homeassistant.components.netgear
 pynetgear==0.10.10

@@ -63,15 +63,45 @@
     "abort": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "no_free_channel": "The dongle has no unused channel left to pair a shutter with.",
-      "pairing_finished": "The pairing window has closed. The shutter appears within a few seconds if it is paired. If it does not obey its new controls, delete it and try again."
+      "no_shutters": "There is no shutter to unpair.",
+      "pairing_finished": "The pairing window has closed. The shutter appears within a few seconds if it is paired. If it does not obey its new controls, delete it and try again.",
+      "still_paired": "The shutter is still paired, and stays in Home Assistant. To try again, start over from mid-travel.",
+      "unpaired": "The shutter is unpaired, and was removed from Home Assistant. It still answers its original remote."
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
     },
     "progress": {
       "pairing": "Perform the sequence on the shutter's remote now, then wait for the window to close."
     },
     "step": {
       "init": {
+        "menu_options": {
+          "pair": "Pair a new shutter",
+          "unpair": "Unpair a shutter"
+        }
+      },
+      "pair": {
         "description": "Pairing is done from the shutter's own remote. The dongle only opens a window for it, and only the shutter you drive during that window is paired — the others are left alone.\n\nBefore you continue, move the shutter to mid-travel and keep its original remote at hand.\n\nOnce you submit, you have {seconds} seconds to:\n\n1. Press up, and wait for the shutter to reach the top.\n2. Press down, and let about four slats appear.\n3. Press stop.\n4. Press up again, and wait for the top.\n\nThen leave the shutter alone until the window closes.",
-        "title": "Pair a new shutter"
+        "title": "[%key:component::neosol::options::step::init::menu_options::pair%]"
+      },
+      "unpair": {
+        "data": {
+          "shutter": "Shutter"
+        },
+        "data_description": {
+          "shutter": "The shutter that should stop obeying Home Assistant. It keeps answering its original remote."
+        },
+        "description": "Unpairing is done from the shutter's own remote, like pairing, and only the shutter you drive is unpaired.\n\nBefore you continue, move the shutter to mid-travel with its original remote, and keep the remote at hand. The sequence to perform follows once you submit.",
+        "title": "[%key:component::neosol::options::step::init::menu_options::unpair%]"
+      },
+      "unpair_confirm": {
+        "description": "You now have one minute to perform this sequence on the shutter's original remote:\n\n1. Press down, and wait for the shutter to reach the bottom.\n2. Press up, and let about two slats appear.\n3. Press stop.\n4. Press down again, and wait for the bottom.\n\nThe shutter confirms with a short back-and-forth. It is the only sign that the unpairing worked: the dongle receives nothing.",
+        "menu_options": {
+          "unpair_confirmed": "The shutter moved back and forth",
+          "unpair_not_confirmed": "The shutter did not confirm"
+        },
+        "title": "[%key:component::neosol::options::step::init::menu_options::unpair%]"
       }
     }
   }

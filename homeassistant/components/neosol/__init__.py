@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_IGNORED_CHANNELS, DOMAIN, MANUFACTURER
+from .const import DOMAIN, MANUFACTURER
 from .coordinator import NeosolConfigEntry, NeosolCoordinator, open_dongle
 
 PLATFORMS = [Platform.COVER]
@@ -69,11 +69,7 @@ async def async_remove_config_entry_device(
     _, identifier = next(iter(device.identifiers))
     channel = int(identifier.rpartition("_")[2])
 
-    ignored = set(entry.options.get(CONF_IGNORED_CHANNELS, []))
-    hass.config_entries.async_update_entry(
-        entry,
-        options={**entry.options, CONF_IGNORED_CHANNELS: sorted(ignored | {channel})},
-    )
+    entry.runtime_data.async_ignore_channel(channel)
     return True
 
 

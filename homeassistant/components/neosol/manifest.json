@@ -9,7 +9,7 @@
   "iot_class": "assumed_state",
   "loggers": ["pyneosol"],
   "quality_scale": "platinum",
-  "requirements": ["pyneosol==1.0.0"],
+  "requirements": ["pyneosol==1.1.0"],
   "single_config_entry": true,
   "usb": [
     {

@@ -39,7 +39,8 @@ rules:
   docs-configuration-parameters:
     status: exempt
     comment: |
-      The options flow pairs a shutter; it stores no configuration parameter.
+      The options flow pairs and unpairs shutters; it stores no configuration
+      parameter.
   docs-installation-parameters: done
   entity-unavailable: done
   integration-owner: done
