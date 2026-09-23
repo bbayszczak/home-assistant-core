@@ -13,5 +13,9 @@ MANUFACTURER = "Profalux"
 # how such a channel is kept from coming back as a shutter.
 CONF_IGNORED_CHANNELS = "ignored_channels"
 
-#: How long the dongle keeps the pairing window open after the register frame.
-PAIRING_WINDOW = timedelta(seconds=60)
+#: How long a motor waits for the remote sequence after a register or unregister frame.
+SEQUENCE_WINDOW = timedelta(seconds=60)
+
+#: How long the shutter moves when checking whether it obeys a channel. Long enough to
+#: be seen, short enough to stop well before an end stop.
+NUDGE_DURATION = timedelta(seconds=2)

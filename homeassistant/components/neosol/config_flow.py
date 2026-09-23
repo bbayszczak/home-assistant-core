@@ -1,10 +1,11 @@
 """Config flow for the Profalux Neosol integration."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any, override
 
 import probatio
-from pyneosol import DongleInfo, NeosolError, NotADongleError
+from pyneosol import Action, DongleInfo, NeosolError, NotADongleError
 
 from homeassistant.components import usb
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
@@ -19,7 +20,7 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.helpers.service_info.usb import UsbServiceInfo
 
-from .const import DOMAIN, LOGGER, PAIRING_WINDOW
+from .const import DOMAIN, LOGGER, NUDGE_DURATION, SEQUENCE_WINDOW
 from .coordinator import NeosolConfigEntry, open_dongle
 
 STEP_PORT_SCHEMA = probatio.Schema(
@@ -154,12 +155,14 @@ class NeosolOptionsFlow(OptionsFlow):
 
     This flow performs actions rather than storing settings: both are timed
     choreographies on the shutter's own remote, and the dongle only sends the frame that
-    starts them.
+    starts them. Nothing confirms either: the motors never answer, and the dongle counts
+    every frame as a transmission whatever happens. So both end by moving the shutter
+    briefly on its channel, and the user, who watches it, tells whether it obeyed.
     """
 
     config_entry: NeosolConfigEntry
 
-    _pairing_task: asyncio.Task[None] | None = None
+    _task: asyncio.Task[None] | None = None
     _error: str | None = None
     _channel: int
 
@@ -178,71 +181,60 @@ class NeosolOptionsFlow(OptionsFlow):
 
         return self.async_show_form(
             step_id="pair",
-            description_placeholders={"seconds": str(PAIRING_WINDOW.seconds)},
+            description_placeholders={"seconds": str(SEQUENCE_WINDOW.seconds)},
         )
 
     async def async_step_pair_window(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Open the pairing window, and hold the flow until it closes."""
-        if self._pairing_task is None:
-            # Not eager: an attempt that fails at once would otherwise run to completion
-            # before the first check, and the user would never see the window open.
-            self._pairing_task = self.hass.async_create_task(
-                self._async_pair(), eager_start=False
-            )
+        """Open the pairing window, and hold the flow until the check is done."""
+        return self._async_hold(
+            "pair_window", "pairing", self._async_pair, "pair_check"
+        )
 
-        if not self._pairing_task.done():
-            return self.async_show_progress(
-                step_id="pair_window",
-                progress_action="pairing",
-                progress_task=self._pairing_task,
-            )
-
-        return self.async_show_progress_done(next_step_id="pair_finish")
-
-    async def async_step_pair_finish(
+    async def async_step_pair_check(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Report how the attempt went."""
-        return self.async_abort(reason=self._error or "pairing_finished")
+        """Ask whether the shutter moved, which only the user can see."""
+        if self._error:
+            return self.async_abort(reason=self._error)
+
+        return self.async_show_menu(
+            step_id="pair_check", menu_options=["pair_moved", "pair_not_moved"]
+        )
+
+    async def async_step_pair_moved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Bring in the new shutter, which obeys its channel."""
+        await self.config_entry.runtime_data.async_request_refresh()
+        return self.async_abort(reason="paired")
+
+    async def async_step_pair_not_moved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Keep out the channel, which no shutter obeys."""
+        self._async_forget_shutter()
+        return self.async_abort(reason="not_paired")
 
     async def _async_pair(self) -> None:
-        """Send the register frame on a free channel, then wait out the window.
-
-        Nothing confirms the pairing: the motors never answer, and the dongle counts the
-        register frame as a transmission whatever happens. The channel therefore shows up
-        as a shutter either way, which the user can remove if the shutter does not obey.
-        """
-        coordinator = self.config_entry.runtime_data
-        try:
-            channels = await coordinator.dongle.channels()
-        except NeosolError:
-            self._error = "cannot_connect"
-            return
+        """Send the register frame on a free channel, wait out the window, then check."""
+        dongle = self.config_entry.runtime_data.dongle
+        channels = await dongle.channels()
 
         free = next((channel for channel in channels if not channel.is_used), None)
         if free is None:
             self._error = "no_free_channel"
             return
 
-        try:
-            await coordinator.dongle.register(free.index)
-        except NeosolError:
-            self._error = "cannot_connect"
-            return
+        self._channel = free.index
+        await dongle.register(free.index)
 
         # The window stays open whether or not the choreography is performed, and the
-        # dongle must not be asked anything until it closes.
-        await asyncio.sleep(PAIRING_WINDOW.total_seconds())
-        await coordinator.async_request_refresh()
-
-    def _shutter_device(self, channel: int) -> dr.DeviceEntry | None:
-        """Return the device of the shutter on ``channel``, if Home Assistant has one."""
-        serial = self.config_entry.runtime_data.info.serial_number
-        return dr.async_get(self.hass).async_get_device_by_identifier(
-            (DOMAIN, f"{serial}_{channel}"), self.config_entry.entry_id
-        )
+        # dongle must not transmit until it closes.
+        await asyncio.sleep(SEQUENCE_WINDOW.total_seconds())
+        # The pairing sequence leaves the shutter at its top stop: only down moves it.
+        await self._async_nudge(Action.CLOSE)
 
     async def async_step_unpair(
         self, user_input: dict[str, Any] | None = None
@@ -258,7 +250,7 @@ class NeosolOptionsFlow(OptionsFlow):
                 errors["base"] = "cannot_connect"
             else:
                 self._channel = channel
-                return await self.async_step_unpair_confirm()
+                return await self.async_step_unpair_window()
 
         # A shutter the user just deleted keeps its channel until the next refresh, and
         # has no device left to be picked by.
@@ -285,32 +277,94 @@ class NeosolOptionsFlow(OptionsFlow):
             errors=errors,
         )
 
-    async def async_step_unpair_confirm(
+    async def async_step_unpair_window(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show the choreography, and ask whether the shutter confirmed.
-
-        The dongle receives nothing, and the channel reads the same afterwards: the short
-        back-and-forth of the shutter is the only sign of success, and only the user sees
-        it.
-        """
-        return self.async_show_menu(
-            step_id="unpair_confirm",
-            menu_options=["unpair_confirmed", "unpair_not_confirmed"],
+        """Show the choreography, and hold the flow until the check is done."""
+        return self._async_hold(
+            "unpair_window", "unpairing", self._async_check_unpairing, "unpair_check"
         )
 
-    async def async_step_unpair_confirmed(
+    async def async_step_unpair_check(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Forget the shutter, which no longer obeys its channel."""
-        self.config_entry.runtime_data.async_ignore_channel(self._channel)
-        if device := self._shutter_device(self._channel):
-            dr.async_get(self.hass).async_remove_device(device.id)
+        """Ask whether the shutter moved, which only the user can see."""
+        if self._error:
+            return self.async_abort(reason=self._error)
 
-        return self.async_abort(reason="unpaired")
+        return self.async_show_menu(
+            step_id="unpair_check", menu_options=["unpair_moved", "unpair_not_moved"]
+        )
 
-    async def async_step_unpair_not_confirmed(
+    async def async_step_unpair_moved(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Leave the shutter in place, since it still obeys its channel."""
         return self.async_abort(reason="still_paired")
+
+    async def async_step_unpair_not_moved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Forget the shutter, which no longer obeys its channel."""
+        self._async_forget_shutter()
+        return self.async_abort(reason="unpaired")
+
+    async def _async_check_unpairing(self) -> None:
+        """Wait out the unpairing window, then check."""
+        # Moving the shutter while its motor still waits for the sequence could disturb
+        # the unpairing, so the check only comes once the window is over.
+        await asyncio.sleep(SEQUENCE_WINDOW.total_seconds())
+        # The unpairing sequence leaves the shutter at its bottom stop: only up moves it.
+        await self._async_nudge(Action.OPEN)
+
+    def _async_hold(
+        self,
+        step_id: str,
+        progress_action: str,
+        job: Callable[[], Awaitable[None]],
+        next_step_id: str,
+    ) -> ConfigFlowResult:
+        """Run ``job`` in the background, and show ``progress_action`` until it is done."""
+        if self._task is None:
+            # Not eager: a job that fails at once would otherwise run to completion
+            # before the first check, and the user would never see the progress.
+            self._task = self.hass.async_create_task(
+                self._async_run(job), eager_start=False
+            )
+
+        if not self._task.done():
+            return self.async_show_progress(
+                step_id=step_id,
+                progress_action=progress_action,
+                progress_task=self._task,
+                description_placeholders={"seconds": str(SEQUENCE_WINDOW.seconds)},
+            )
+
+        return self.async_show_progress_done(next_step_id=next_step_id)
+
+    async def _async_run(self, job: Callable[[], Awaitable[None]]) -> None:
+        """Run ``job``, turning a dongle failure into the error the check reports."""
+        try:
+            await job()
+        except NeosolError:
+            self._error = "cannot_connect"
+
+    async def _async_nudge(self, action: Action) -> None:
+        """Move the shutter briefly on its channel, for the user to watch."""
+        dongle = self.config_entry.runtime_data.dongle
+        await dongle.send(self._channel, action)
+        await asyncio.sleep(NUDGE_DURATION.total_seconds())
+        await dongle.send(self._channel, Action.STOP)
+
+    def _shutter_device(self, channel: int) -> dr.DeviceEntry | None:
+        """Return the device of the shutter on ``channel``, if Home Assistant has one."""
+        serial = self.config_entry.runtime_data.info.serial_number
+        return dr.async_get(self.hass).async_get_device_by_identifier(
+            (DOMAIN, f"{serial}_{channel}"), self.config_entry.entry_id
+        )
+
+    def _async_forget_shutter(self) -> None:
+        """Keep the channel out of the shutters, and remove its device if it has one."""
+        self.config_entry.runtime_data.async_ignore_channel(self._channel)
+        if device := self._shutter_device(self._channel):
+            dr.async_get(self.hass).async_remove_device(device.id)
