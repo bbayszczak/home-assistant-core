@@ -8,14 +8,16 @@ LOGGER = logging.getLogger(__package__)
 
 MANUFACTURER = "Profalux"
 
-# Channels the user removed or unpaired. The dongle counts a channel as used once it
-# transmitted, whether the pairing failed or the shutter was unpaired since, so this is
-# how such a channel is kept from coming back as a shutter.
+# Channels a check movement showed no shutter obeys: a failed pairing, an unpairing, or
+# a forgotten shutter. The dongle counts a channel as used once it transmitted, so this
+# is what keeps such a channel from coming back as a shutter, and what frees it for the
+# next pairing.
 CONF_IGNORED_CHANNELS = "ignored_channels"
 
 #: How long a motor waits for the remote sequence after a register or unregister frame.
 SEQUENCE_WINDOW = timedelta(seconds=60)
 
-#: How long the shutter moves when checking whether it obeys a channel. Long enough to
-#: be seen, short enough to stop well before an end stop.
-NUDGE_DURATION = timedelta(seconds=2)
+# The check movement goes up, then down, so that a shutter resting against either end
+# stop still visibly moves if it obeys the channel.
+NUDGE_UP_DURATION = timedelta(seconds=3)
+NUDGE_DOWN_DURATION = timedelta(seconds=2)

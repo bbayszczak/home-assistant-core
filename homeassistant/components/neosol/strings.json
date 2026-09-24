@@ -62,10 +62,12 @@
   "options": {
     "abort": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "no_free_channel": "The dongle has no unused channel left to pair a shutter with.",
-      "no_shutters": "There is no shutter to unpair.",
+      "forgotten": "The shutter was removed from Home Assistant, and its channel can be paired again.",
+      "no_free_channel": "Every channel of the dongle already has a shutter.",
+      "no_shutters": "There is no shutter to pick.",
       "not_paired": "The pairing did not take, so the shutter was left out of Home Assistant. To try again, start over from mid-travel.",
       "paired": "The shutter is paired, and appears within a few seconds.",
+      "still_obeys": "The shutter still obeys its channel, so it stays in Home Assistant. To remove it, unpair it.",
       "still_paired": "The shutter is still paired, and stays in Home Assistant. To try again, start over from mid-travel.",
       "unpaired": "The shutter is unpaired, and was removed from Home Assistant. It still answers its original remote."
     },
@@ -73,22 +75,42 @@
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
     },
     "progress": {
-      "pairing": "Perform the sequence on the shutter's remote now, then leave the shutter alone until the window closes. Home Assistant then moves it down briefly, to check the pairing.",
-      "unpairing": "You have {seconds} seconds to perform this sequence on the shutter's original remote:\n\n1. Press down, and wait for the shutter to reach the bottom.\n2. Press up, and let about two slats appear.\n3. Press stop.\n4. Press down again, and wait for the bottom.\n\nThe shutter should answer with a short back-and-forth. Once the time is up, Home Assistant moves it up briefly, to check the unpairing."
+      "checking": "Watch the shutter: Home Assistant moves it up, then down, briefly.",
+      "pairing": "Perform the sequence on the shutter's remote now, then leave the shutter alone until the window closes. Home Assistant then moves it up, then down, briefly, to check the pairing.",
+      "unpairing": "You have {seconds} seconds to perform this sequence on the shutter's original remote:\n\n1. Press down, and wait for the shutter to reach the bottom.\n2. Press up, and let about two slats appear.\n3. Press stop.\n4. Press down again, and wait for the bottom.\n\nThe shutter should answer with a short back-and-forth. Once the time is up, Home Assistant moves it up, then down, briefly, to check the unpairing."
     },
     "step": {
+      "forget": {
+        "data": {
+          "shutter": "[%key:component::neosol::options::step::unpair::data::shutter%]"
+        },
+        "data_description": {
+          "shutter": "The shutter to remove from Home Assistant."
+        },
+        "description": "**This does not unpair the shutter.** It only removes it from Home Assistant, for a shutter that no longer obeys its channel, such as one whose motor was replaced. A shutter that still obeys has to be unpaired instead.\n\nOnce you submit, Home Assistant moves the shutter up, then down, briefly, and only forgets it if it does not move.",
+        "title": "[%key:component::neosol::options::step::init::menu_options::forget%]"
+      },
+      "forget_check": {
+        "description": "Home Assistant just moved the shutter up, then down, briefly. If it did not move, no shutter obeys the channel any more, and it can be forgotten. If it moved, it still obeys: unpair it instead.",
+        "menu_options": {
+          "forget_moved": "[%key:component::neosol::options::step::pair_check::menu_options::pair_moved%]",
+          "forget_not_moved": "[%key:component::neosol::options::step::pair_check::menu_options::pair_not_moved%]"
+        },
+        "title": "[%key:component::neosol::options::step::init::menu_options::forget%]"
+      },
       "init": {
         "menu_options": {
+          "forget": "Forget a shutter",
           "pair": "Pair a new shutter",
           "unpair": "Unpair a shutter"
         }
       },
       "pair": {
-        "description": "Pairing is done from the shutter's own remote. The dongle only opens a window for it, and only the shutter you drive during that window is paired — the others are left alone.\n\nBefore you continue, move the shutter to mid-travel and keep its original remote at hand.\n\nOnce you submit, you have {seconds} seconds to:\n\n1. Press up, and wait for the shutter to reach the top.\n2. Press down, and let about four slats appear.\n3. Press stop.\n4. Press up again, and wait for the top.\n\nThen leave the shutter alone until the window closes. Home Assistant then moves it down briefly, and asks you whether it moved.",
+        "description": "Pairing is done from the shutter's own remote. The dongle only opens a window for it, and only the shutter you drive during that window is paired — the others are left alone.\n\nBefore you continue, move the shutter to mid-travel and keep its original remote at hand.\n\nOnce you submit, you have {seconds} seconds to:\n\n1. Press up, and wait for the shutter to reach the top.\n2. Press down, and let about four slats appear.\n3. Press stop.\n4. Press up again, and wait for the top.\n\nThen leave the shutter alone until the window closes. Home Assistant then moves it up, then down, briefly, and asks you whether it moved.",
         "title": "[%key:component::neosol::options::step::init::menu_options::pair%]"
       },
       "pair_check": {
-        "description": "Home Assistant just moved the shutter down briefly, on its new channel. If it moved, it is paired. If it did not, the pairing did not take.",
+        "description": "Home Assistant just moved the shutter up, then down, briefly, on its new channel. If it moved, it is paired. If it did not, the pairing did not take.",
         "menu_options": {
           "pair_moved": "It moved",
           "pair_not_moved": "It did not move"
@@ -106,7 +128,7 @@
         "title": "[%key:component::neosol::options::step::init::menu_options::unpair%]"
       },
       "unpair_check": {
-        "description": "Home Assistant just moved the shutter up briefly, on the channel being unpaired. If it did not move, it is unpaired. If it moved, it still obeys the channel.",
+        "description": "Home Assistant just moved the shutter up, then down, briefly, on the channel being unpaired. If it did not move, it is unpaired. If it moved, it still obeys the channel.",
         "menu_options": {
           "unpair_moved": "[%key:component::neosol::options::step::pair_check::menu_options::pair_moved%]",
           "unpair_not_moved": "[%key:component::neosol::options::step::pair_check::menu_options::pair_not_moved%]"

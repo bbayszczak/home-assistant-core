@@ -56,17 +56,27 @@ class NeosolCoordinator(DataUpdateCoordinator[dict[int, Channel]]):
         self.dongle = dongle
         self.info = info
 
+    @property
+    def ignored_channels(self) -> set[int]:
+        """Return the channels kept out of the shutters."""
+        return set(self.config_entry.options.get(CONF_IGNORED_CHANNELS, []))
+
     @callback
     def async_ignore_channel(self, channel: int) -> None:
         """Keep ``channel`` out of the shutters from now on."""
+        self._async_set_ignored_channels(self.ignored_channels | {channel})
+
+    @callback
+    def async_unignore_channel(self, channel: int) -> None:
+        """Let ``channel`` show up as a shutter again."""
+        self._async_set_ignored_channels(self.ignored_channels - {channel})
+
+    @callback
+    def _async_set_ignored_channels(self, channels: set[int]) -> None:
+        """Store ``channels`` as the ones kept out of the shutters."""
         entry = self.config_entry
-        ignored = set(entry.options.get(CONF_IGNORED_CHANNELS, []))
         self.hass.config_entries.async_update_entry(
-            entry,
-            options={
-                **entry.options,
-                CONF_IGNORED_CHANNELS: sorted(ignored | {channel}),
-            },
+            entry, options={**entry.options, CONF_IGNORED_CHANNELS: sorted(channels)}
         )
 
     @override
@@ -96,7 +106,7 @@ class NeosolCoordinator(DataUpdateCoordinator[dict[int, Channel]]):
                 translation_placeholders={"error": str(err)},
             ) from err
 
-        ignored = set(self.config_entry.options.get(CONF_IGNORED_CHANNELS, []))
+        ignored = self.ignored_channels
         return {
             channel.index: channel
             for channel in channels

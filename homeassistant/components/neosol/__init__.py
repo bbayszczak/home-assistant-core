@@ -52,27 +52,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: NeosolConfigEntry) -> bo
     return True
 
 
-async def async_remove_config_entry_device(
-    hass: HomeAssistant, entry: NeosolConfigEntry, device: dr.AnyDeviceEntry
-) -> bool:
-    """Let the user remove a shutter, but never the dongle itself.
-
-    The dongle counts a pairing attempt as a transmission, so an attempt that did not
-    take leaves its channel looking paired and produces a shutter that answers nothing.
-    Removing it has to be remembered, otherwise the next refresh would bring it back.
-    """
-    dongle = (DOMAIN, entry.runtime_data.info.serial_number)
-    if dongle in device.identifiers:
-        return False
-
-    # A shutter carries exactly one identifier, "<dongle serial>_<channel>".
-    _, identifier = next(iter(device.identifiers))
-    channel = int(identifier.rpartition("_")[2])
-
-    entry.runtime_data.async_ignore_channel(channel)
-    return True
-
-
 async def async_unload_entry(hass: HomeAssistant, entry: NeosolConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

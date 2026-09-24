@@ -87,7 +87,12 @@ rules:
     comment: |
       Nothing the user can act on can go wrong beyond the dongle being unplugged,
       which the config entry retry already reports.
-  stale-devices: done
+  stale-devices:
+    status: done
+    comment: |
+      Shutters leave through the options flow, once a brief movement shows they no
+      longer obey their channel: deleting one that still obeys would free a channel
+      the next pairing would share with it.
   # Platinum
   async-dependency: done
   inject-websession:

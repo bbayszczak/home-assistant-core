@@ -20,7 +20,13 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.helpers.service_info.usb import UsbServiceInfo
 
-from .const import DOMAIN, LOGGER, NUDGE_DURATION, SEQUENCE_WINDOW
+from .const import (
+    DOMAIN,
+    LOGGER,
+    NUDGE_DOWN_DURATION,
+    NUDGE_UP_DURATION,
+    SEQUENCE_WINDOW,
+)
 from .coordinator import NeosolConfigEntry, open_dongle
 
 STEP_PORT_SCHEMA = probatio.Schema(
@@ -41,7 +47,7 @@ class NeosolConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     @override
     def async_get_options_flow(config_entry: NeosolConfigEntry) -> OptionsFlow:
-        """Return the flow that pairs and unpairs shutters."""
+        """Return the flow that pairs, unpairs and forgets shutters."""
         return NeosolOptionsFlow()
 
     _discovered_port: str
@@ -151,13 +157,16 @@ class NeosolConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class NeosolOptionsFlow(OptionsFlow):
-    """Pair a new shutter with a free channel of the dongle, or unpair one.
+    """Pair a new shutter with a free channel of the dongle, unpair one, or forget one.
 
-    This flow performs actions rather than storing settings: both are timed
-    choreographies on the shutter's own remote, and the dongle only sends the frame that
-    starts them. Nothing confirms either: the motors never answer, and the dongle counts
-    every frame as a transmission whatever happens. So both end by moving the shutter
-    briefly on its channel, and the user, who watches it, tells whether it obeyed.
+    This flow performs actions rather than storing settings. Nothing confirms any of
+    them: the motors never answer, and the dongle counts every frame as a transmission
+    whatever happens. So each ends by moving the shutter briefly on its channel, and the
+    user, who watches it, tells whether it obeyed.
+
+    It is also the only way out of Home Assistant for a shutter: the device page offers
+    no delete, because a shutter deleted while it still obeys would free a channel that
+    the next pairing would then share with it.
     """
 
     config_entry: NeosolConfigEntry
@@ -169,8 +178,10 @@ class NeosolOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Let the user pick between pairing and unpairing."""
-        return self.async_show_menu(step_id="init", menu_options=["pair", "unpair"])
+        """Let the user pick between pairing, unpairing and forgetting."""
+        return self.async_show_menu(
+            step_id="init", menu_options=["pair", "unpair", "forget"]
+        )
 
     async def async_step_pair(
         self, user_input: dict[str, Any] | None = None
@@ -195,13 +206,8 @@ class NeosolOptionsFlow(OptionsFlow):
     async def async_step_pair_check(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask whether the shutter moved, which only the user can see."""
-        if self._error:
-            return self.async_abort(reason=self._error)
-
-        return self.async_show_menu(
-            step_id="pair_check", menu_options=["pair_moved", "pair_not_moved"]
-        )
+        """Ask whether the shutter moved on the check."""
+        return self._async_show_check("pair_check", ["pair_moved", "pair_not_moved"])
 
     async def async_step_pair_moved(
         self, user_input: dict[str, Any] | None = None
@@ -219,22 +225,34 @@ class NeosolOptionsFlow(OptionsFlow):
 
     async def _async_pair(self) -> None:
         """Send the register frame on a free channel, wait out the window, then check."""
-        dongle = self.config_entry.runtime_data.dongle
-        channels = await dongle.channels()
+        coordinator = self.config_entry.runtime_data
+        channels = await coordinator.dongle.channels()
 
-        free = next((channel for channel in channels if not channel.is_used), None)
+        # A channel is free when no shutter in Home Assistant uses it: it either never
+        # transmitted, or a check showed no shutter obeys it any more.
+        ignored = coordinator.ignored_channels
+        free = next(
+            (
+                channel
+                for channel in channels
+                if not channel.is_used or channel.index in ignored
+            ),
+            None,
+        )
         if free is None:
             self._error = "no_free_channel"
             return
 
         self._channel = free.index
-        await dongle.register(free.index)
+        # Should the user leave before answering, the channel must show up as a shutter
+        # like a never used one, rather than stay free while a shutter may obey it.
+        coordinator.async_unignore_channel(free.index)
+        await coordinator.dongle.register(free.index)
 
         # The window stays open whether or not the choreography is performed, and the
         # dongle must not transmit until it closes.
         await asyncio.sleep(SEQUENCE_WINDOW.total_seconds())
-        # The pairing sequence leaves the shutter at its top stop: only down moves it.
-        await self._async_nudge(Action.CLOSE)
+        await self._async_nudge()
 
     async def async_step_unpair(
         self, user_input: dict[str, Any] | None = None
@@ -252,30 +270,7 @@ class NeosolOptionsFlow(OptionsFlow):
                 self._channel = channel
                 return await self.async_step_unpair_window()
 
-        # A shutter the user just deleted keeps its channel until the next refresh, and
-        # has no device left to be picked by.
-        shutters = [
-            SelectOptionDict(
-                value=str(channel),
-                label=device.name_by_user or device.name or str(channel),
-            )
-            for channel in sorted(self.config_entry.runtime_data.data)
-            if (device := self._shutter_device(channel))
-        ]
-        if not shutters:
-            return self.async_abort(reason="no_shutters")
-
-        return self.async_show_form(
-            step_id="unpair",
-            data_schema=probatio.Schema(
-                {
-                    probatio.Required(CONF_SHUTTER): SelectSelector(
-                        SelectSelectorConfig(options=shutters)
-                    )
-                }
-            ),
-            errors=errors,
-        )
+        return self._async_show_shutter_form("unpair", errors)
 
     async def async_step_unpair_window(
         self, user_input: dict[str, Any] | None = None
@@ -288,12 +283,9 @@ class NeosolOptionsFlow(OptionsFlow):
     async def async_step_unpair_check(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask whether the shutter moved, which only the user can see."""
-        if self._error:
-            return self.async_abort(reason=self._error)
-
-        return self.async_show_menu(
-            step_id="unpair_check", menu_options=["unpair_moved", "unpair_not_moved"]
+        """Ask whether the shutter moved on the check."""
+        return self._async_show_check(
+            "unpair_check", ["unpair_moved", "unpair_not_moved"]
         )
 
     async def async_step_unpair_moved(
@@ -314,8 +306,84 @@ class NeosolOptionsFlow(OptionsFlow):
         # Moving the shutter while its motor still waits for the sequence could disturb
         # the unpairing, so the check only comes once the window is over.
         await asyncio.sleep(SEQUENCE_WINDOW.total_seconds())
-        # The unpairing sequence leaves the shutter at its bottom stop: only up moves it.
-        await self._async_nudge(Action.OPEN)
+        await self._async_nudge()
+
+    async def async_step_forget(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick the shutter to forget, for one that no longer obeys its channel."""
+        if user_input is not None:
+            self._channel = int(user_input[CONF_SHUTTER])
+            return await self.async_step_forget_window()
+
+        return self._async_show_shutter_form("forget", {})
+
+    async def async_step_forget_window(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Hold the flow until the check is done."""
+        return self._async_hold(
+            "forget_window", "checking", self._async_nudge, "forget_check"
+        )
+
+    async def async_step_forget_check(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask whether the shutter moved on the check."""
+        return self._async_show_check(
+            "forget_check", ["forget_moved", "forget_not_moved"]
+        )
+
+    async def async_step_forget_moved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Keep the shutter, which still obeys its channel and has to be unpaired."""
+        return self.async_abort(reason="still_obeys")
+
+    async def async_step_forget_not_moved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Forget the shutter, which no longer obeys its channel."""
+        self._async_forget_shutter()
+        return self.async_abort(reason="forgotten")
+
+    def _async_show_shutter_form(
+        self, step_id: str, errors: dict[str, str]
+    ) -> ConfigFlowResult:
+        """Show a form to pick one of the shutters, by the name the user knows."""
+        # A shutter forgotten or unpaired keeps its channel in the coordinator data until
+        # the next refresh, but has no device left to be picked by.
+        shutters = [
+            SelectOptionDict(
+                value=str(channel),
+                label=device.name_by_user or device.name or str(channel),
+            )
+            for channel in sorted(self.config_entry.runtime_data.data)
+            if (device := self._shutter_device(channel))
+        ]
+        if not shutters:
+            return self.async_abort(reason="no_shutters")
+
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=probatio.Schema(
+                {
+                    probatio.Required(CONF_SHUTTER): SelectSelector(
+                        SelectSelectorConfig(options=shutters)
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    def _async_show_check(
+        self, step_id: str, menu_options: list[str]
+    ) -> ConfigFlowResult:
+        """Ask whether the shutter moved, which only the user can see."""
+        if self._error:
+            return self.async_abort(reason=self._error)
+
+        return self.async_show_menu(step_id=step_id, menu_options=menu_options)
 
     def _async_hold(
         self,
@@ -349,11 +417,14 @@ class NeosolOptionsFlow(OptionsFlow):
         except NeosolError:
             self._error = "cannot_connect"
 
-    async def _async_nudge(self, action: Action) -> None:
-        """Move the shutter briefly on its channel, for the user to watch."""
+    async def _async_nudge(self) -> None:
+        """Move the shutter up, then down, briefly on its channel, for the user to watch."""
         dongle = self.config_entry.runtime_data.dongle
-        await dongle.send(self._channel, action)
-        await asyncio.sleep(NUDGE_DURATION.total_seconds())
+        await dongle.send(self._channel, Action.OPEN)
+        await asyncio.sleep(NUDGE_UP_DURATION.total_seconds())
+        await dongle.send(self._channel, Action.STOP)
+        await dongle.send(self._channel, Action.CLOSE)
+        await asyncio.sleep(NUDGE_DOWN_DURATION.total_seconds())
         await dongle.send(self._channel, Action.STOP)
 
     def _shutter_device(self, channel: int) -> dr.DeviceEntry | None:

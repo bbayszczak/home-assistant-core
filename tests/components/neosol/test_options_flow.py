@@ -9,19 +9,31 @@ import pytest
 
 from homeassistant.components.neosol.const import CONF_IGNORED_CHANNELS, DOMAIN
 from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.const import CONF_DEVICE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.helpers import device_registry as dr
-from homeassistant.setup import async_setup_component
 
-from . import MOCK_SERIAL, setup_integration
+from . import MOCK_PORT, MOCK_SERIAL, setup_integration
 from .conftest import CHANNELS
 
 from tests.common import MockConfigEntry
-from tests.typing import WebSocketGenerator
 
 PAIRED_SHUTTER = (DOMAIN, f"{MOCK_SERIAL}_2")
 UNPAIRED_SHUTTER = (DOMAIN, f"{MOCK_SERIAL}_1")
+
+
+def _nudge(channel: int) -> list:
+    """Return the frames of the check movement on ``channel``.
+
+    Up, then down, so that a shutter resting against either end stop still moves.
+    """
+    return [
+        call(channel, Action.OPEN),
+        call(channel, Action.STOP),
+        call(channel, Action.CLOSE),
+        call(channel, Action.STOP),
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +45,12 @@ def no_wait() -> Generator[None]:
             timedelta(0),
         ),
         patch(
-            "homeassistant.components.neosol.config_flow.NUDGE_DURATION", timedelta(0)
+            "homeassistant.components.neosol.config_flow.NUDGE_UP_DURATION",
+            timedelta(0),
+        ),
+        patch(
+            "homeassistant.components.neosol.config_flow.NUDGE_DOWN_DURATION",
+            timedelta(0),
         ),
     ):
         yield
@@ -74,13 +91,13 @@ async def _async_run_pairing(
     return await _async_wait_for_check(hass, result)
 
 
-async def _async_run_unpairing(
-    hass: HomeAssistant, entry: MockConfigEntry
+async def _async_run_on_shutter(
+    hass: HomeAssistant, entry: MockConfigEntry, option: str
 ) -> ConfigFlowResult:
-    """Walk through the unpairing of shutter 1 up to the question on the check."""
-    result = await _async_open_menu_option(hass, entry, "unpair")
+    """Walk through ``option`` on shutter 1 up to the question on the check."""
+    result = await _async_open_menu_option(hass, entry, option)
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "unpair"
+    assert result["step_id"] == option
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"shutter": "1"}
@@ -98,11 +115,7 @@ async def test_pairing_moved(
 
     # The window is opened on the first channel that never transmitted.
     mock_dongle.register.assert_awaited_once_with(2)
-    # The pairing sequence ends at the top stop, so only down can show a movement.
-    assert mock_dongle.send.await_args_list == [
-        call(2, Action.CLOSE),
-        call(2, Action.STOP),
-    ]
+    assert mock_dongle.send.await_args_list == _nudge(2)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "pair_check"
 
@@ -153,6 +166,32 @@ async def test_pairing_not_moved(
     )
 
 
+async def test_pairing_reuses_a_freed_channel(
+    hass: HomeAssistant, mock_dongle: MagicMock
+) -> None:
+    """Test a channel no shutter obeys any more is paired again, before unused ones."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_DEVICE: MOCK_PORT},
+        unique_id=MOCK_SERIAL,
+        options={CONF_IGNORED_CHANNELS: [1]},
+    )
+    await setup_integration(hass, entry)
+    assert hass.states.get("cover.shutter_1") is None
+
+    result = await _async_run_pairing(hass, entry)
+    mock_dongle.register.assert_awaited_once_with(1)
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "pair_moved"}
+    )
+    await hass.async_block_till_done()
+
+    assert result["reason"] == "paired"
+    assert entry.options[CONF_IGNORED_CHANNELS] == []
+    assert hass.states.get("cover.shutter_1") is not None
+
+
 async def test_pairing_without_a_free_channel(
     hass: HomeAssistant, mock_dongle: MagicMock, mock_config_entry: MockConfigEntry
 ) -> None:
@@ -193,14 +232,10 @@ async def test_unpairing_not_moved(
     """Test a shutter that no longer moves on the check is removed, and kept out."""
     await setup_integration(hass, mock_config_entry)
 
-    result = await _async_run_unpairing(hass, mock_config_entry)
+    result = await _async_run_on_shutter(hass, mock_config_entry, "unpair")
 
     mock_dongle.unregister.assert_awaited_once_with(1)
-    # The unpairing sequence ends at the bottom stop, so only up can show a movement.
-    assert mock_dongle.send.await_args_list == [
-        call(1, Action.OPEN),
-        call(1, Action.STOP),
-    ]
+    assert mock_dongle.send.await_args_list == _nudge(1)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "unpair_check"
 
@@ -231,7 +266,7 @@ async def test_unpairing_moved(
     """Test a shutter that still moves on the check is left in place."""
     await setup_integration(hass, mock_config_entry)
 
-    result = await _async_run_unpairing(hass, mock_config_entry)
+    result = await _async_run_on_shutter(hass, mock_config_entry, "unpair")
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "unpair_moved"}
     )
@@ -276,40 +311,94 @@ async def test_unpairing_check_failure(
     await setup_integration(hass, mock_config_entry)
     mock_dongle.send.side_effect = TransportError("link died")
 
-    result = await _async_run_unpairing(hass, mock_config_entry)
+    result = await _async_run_on_shutter(hass, mock_config_entry, "unpair")
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "cannot_connect"
 
 
-async def test_unpairing_without_shutters(
-    hass: HomeAssistant, mock_dongle: MagicMock, mock_config_entry: MockConfigEntry
+async def test_forgetting_not_moved(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_dongle: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test a shutter that does not move on the check is forgotten, without unpairing."""
+    await setup_integration(hass, mock_config_entry)
+
+    result = await _async_run_on_shutter(hass, mock_config_entry, "forget")
+
+    mock_dongle.unregister.assert_not_awaited()
+    assert mock_dongle.send.await_args_list == _nudge(1)
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "forget_check"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "forget_not_moved"}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "forgotten"
+    assert mock_config_entry.options[CONF_IGNORED_CHANNELS] == [1]
+    assert (
+        device_registry.async_get_device_by_identifier(
+            UNPAIRED_SHUTTER, mock_config_entry.entry_id
+        )
+        is None
+    )
+
+
+@pytest.mark.usefixtures("mock_dongle")
+async def test_forgetting_moved(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test a shutter that still moves on the check cannot be forgotten."""
+    await setup_integration(hass, mock_config_entry)
+
+    result = await _async_run_on_shutter(hass, mock_config_entry, "forget")
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "forget_moved"}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "still_obeys"
+    assert CONF_IGNORED_CHANNELS not in mock_config_entry.options
+    assert device_registry.async_get_device_by_identifier(
+        UNPAIRED_SHUTTER, mock_config_entry.entry_id
+    )
+
+
+@pytest.mark.parametrize("option", ["unpair", "forget"])
+async def test_picking_without_shutters(
+    hass: HomeAssistant,
+    mock_dongle: MagicMock,
+    mock_config_entry: MockConfigEntry,
+    option: str,
 ) -> None:
     """Test there is nothing to pick when the dongle exposes no shutter."""
     mock_dongle.used_channels.return_value = []
     await setup_integration(hass, mock_config_entry)
 
-    result = await _async_open_menu_option(hass, mock_config_entry, "unpair")
+    result = await _async_open_menu_option(hass, mock_config_entry, option)
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "no_shutters"
 
 
 @pytest.mark.usefixtures("mock_dongle")
-async def test_a_deleted_shutter_cannot_be_unpaired(
-    hass: HomeAssistant,
-    hass_ws_client: WebSocketGenerator,
-    device_registry: dr.DeviceRegistry,
-    mock_config_entry: MockConfigEntry,
+async def test_a_forgotten_shutter_is_no_longer_offered(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
 ) -> None:
-    """Test a shutter deleted since the last refresh is no longer offered."""
-    assert await async_setup_component(hass, "config", {})
+    """Test a shutter forgotten since the last refresh cannot be picked again."""
     await setup_integration(hass, mock_config_entry)
-    device = device_registry.async_get_device_by_identifier(
-        UNPAIRED_SHUTTER, mock_config_entry.entry_id
+    result = await _async_run_on_shutter(hass, mock_config_entry, "forget")
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "forget_not_moved"}
     )
-    client = await hass_ws_client(hass)
-    assert (await client.remove_device(device.id))["success"]
+    await hass.async_block_till_done()
 
     result = await _async_open_menu_option(hass, mock_config_entry, "unpair")
 

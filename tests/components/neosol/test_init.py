@@ -7,17 +7,18 @@ from pyneosol import DongleNotFoundError, NotADongleError, ProtocolError, Transp
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
-from homeassistant.components.neosol import async_remove_config_entry_device
 from homeassistant.components.neosol.const import CONF_IGNORED_CHANNELS, DOMAIN
 from homeassistant.components.neosol.coordinator import SCAN_INTERVAL
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.const import CONF_DEVICE, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.setup import async_setup_component
 
-from . import MOCK_SERIAL, setup_integration
+from . import MOCK_PORT, MOCK_SERIAL, setup_integration
 
 from tests.common import MockConfigEntry, async_fire_time_changed
+from tests.typing import WebSocketGenerator
 
 
 @pytest.mark.usefixtures("mock_dongle")
@@ -135,50 +136,48 @@ async def test_channel_table_error_keeps_the_entry(
     assert hass.states.get("cover.shutter_0").state == STATE_UNAVAILABLE
 
 
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        pytest.param(MOCK_SERIAL, id="dongle"),
+        pytest.param(f"{MOCK_SERIAL}_1", id="shutter"),
+    ],
+)
 @pytest.mark.usefixtures("mock_dongle")
-async def test_the_dongle_cannot_be_removed(
+async def test_devices_cannot_be_deleted(
     hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
     device_registry: dr.DeviceRegistry,
     mock_config_entry: MockConfigEntry,
+    identifier: str,
 ) -> None:
-    """Test the dongle device is not removable, since the entry owns it."""
-    await setup_integration(hass, mock_config_entry)
-    device = device_registry.async_get_device_by_identifier(
-        (DOMAIN, MOCK_SERIAL), mock_config_entry.entry_id
-    )
+    """Test no device can be deleted from its page.
 
-    assert (
-        await async_remove_config_entry_device(hass, mock_config_entry, device) is False
-    )
-
-
-@pytest.mark.usefixtures("mock_dongle")
-async def test_a_removed_shutter_stays_away(
-    hass: HomeAssistant,
-    device_registry: dr.DeviceRegistry,
-    mock_config_entry: MockConfigEntry,
-    freezer: FrozenDateTimeFactory,
-) -> None:
-    """Test a removed shutter is not brought back by the next refresh.
-
-    A pairing attempt that did not take leaves its channel looking paired, so removing
-    the shutter it created has to be remembered.
+    A shutter deleted while it still obeys would free a channel the next pairing would
+    share with it, so shutters only leave through the checked options flow.
     """
+    assert await async_setup_component(hass, "config", {})
     await setup_integration(hass, mock_config_entry)
     device = device_registry.async_get_device_by_identifier(
-        (DOMAIN, f"{MOCK_SERIAL}_1"), mock_config_entry.entry_id
+        (DOMAIN, identifier), mock_config_entry.entry_id
+    )
+    client = await hass_ws_client(hass)
+
+    assert not (await client.remove_device(device.id))["success"]
+    assert device_registry.async_get(device.id)
+
+
+@pytest.mark.usefixtures("mock_dongle")
+async def test_an_ignored_channel_stays_out(hass: HomeAssistant) -> None:
+    """Test a channel a check showed no shutter obeys is not brought in by a refresh."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_DEVICE: MOCK_PORT},
+        unique_id=MOCK_SERIAL,
+        options={CONF_IGNORED_CHANNELS: [1]},
     )
 
-    assert (
-        await async_remove_config_entry_device(hass, mock_config_entry, device) is True
-    )
-    await hass.async_block_till_done()
+    await setup_integration(hass, entry)
 
-    assert mock_config_entry.options[CONF_IGNORED_CHANNELS] == [1]
-
-    freezer.tick(SCAN_INTERVAL)
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-
-    assert 1 not in mock_config_entry.runtime_data.data
-    assert 0 in mock_config_entry.runtime_data.data
+    assert list(entry.runtime_data.data) == [0]
+    assert hass.states.get("cover.shutter_1") is None
