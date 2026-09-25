@@ -374,6 +374,7 @@ class NeosolOptionsFlow(OptionsFlow):
                 }
             ),
             errors=errors,
+            description_placeholders={"seconds": str(SEQUENCE_WINDOW.seconds)},
         )
 
     def _async_show_check(

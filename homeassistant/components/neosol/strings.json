@@ -76,8 +76,8 @@
     },
     "progress": {
       "checking": "Watch the shutter: Home Assistant moves it up, then down, briefly.",
-      "pairing": "Perform the sequence on the shutter's remote now, then leave the shutter alone until the window closes. Home Assistant then moves it up, then down, briefly, to check the pairing.",
-      "unpairing": "You have {seconds} seconds to perform this sequence on the shutter's original remote:\n\n1. Press down, and wait for the shutter to reach the bottom.\n2. Press up, and let about two slats appear.\n3. Press stop.\n4. Press down again, and wait for the bottom.\n\nThe shutter should answer with a short back-and-forth. Once the time is up, Home Assistant moves it up, then down, briefly, to check the unpairing."
+      "pairing": "You have {seconds} seconds to perform this sequence on the shutter's original remote:\n\n1. Press up, and wait for the shutter to reach the top.\n2. Press down, and let about four slats appear.\n3. Press stop.\n4. Press up again, and wait for the top.\n\nThen leave the shutter alone until the time is up. Home Assistant then moves it up, then down, briefly, to check the pairing.",
+      "unpairing": "You have {seconds} seconds to perform this sequence on the shutter's original remote:\n\n1. Press down, and wait for the shutter to reach the bottom.\n2. Press up, and let about two slats appear.\n3. Press stop.\n4. Press down again, and wait for the bottom.\n\nThe shutter should answer with a short back-and-forth. Then leave it alone until the time is up. Home Assistant then moves it up, then down, briefly, to check the unpairing."
     },
     "step": {
       "forget": {
@@ -106,7 +106,7 @@
         }
       },
       "pair": {
-        "description": "Pairing is done from the shutter's own remote. The dongle only opens a window for it, and only the shutter you drive during that window is paired — the others are left alone.\n\nBefore you continue, move the shutter to mid-travel and keep its original remote at hand.\n\nOnce you submit, you have {seconds} seconds to:\n\n1. Press up, and wait for the shutter to reach the top.\n2. Press down, and let about four slats appear.\n3. Press stop.\n4. Press up again, and wait for the top.\n\nThen leave the shutter alone until the window closes. Home Assistant then moves it up, then down, briefly, and asks you whether it moved.",
+        "description": "Pairing is done from the shutter's own remote. The dongle only opens a window for it, and only the shutter you drive during that window is paired — the others are left alone.\n\nBefore you continue, move the shutter to mid-travel and keep its original remote at hand.\n\nOnce you submit, you have {seconds} seconds to:\n\n1. Press up, and wait for the shutter to reach the top.\n2. Press down, and let about four slats appear.\n3. Press stop.\n4. Press up again, and wait for the top.\n\nThen leave the shutter alone until the time is up. Home Assistant then moves it up, then down, briefly, and asks you whether it moved.",
         "title": "[%key:component::neosol::options::step::init::menu_options::pair%]"
       },
       "pair_check": {
@@ -124,7 +124,7 @@
         "data_description": {
           "shutter": "The shutter that should stop obeying Home Assistant. It keeps answering its original remote."
         },
-        "description": "Unpairing is done from the shutter's own remote, like pairing, and only the shutter you drive is unpaired.\n\nBefore you continue, move the shutter to mid-travel with its original remote, and keep the remote at hand. The sequence to perform shows once you submit.",
+        "description": "Unpairing is done from the shutter's own remote. The dongle only opens a window for it, and only the shutter you drive during that window is unpaired — the others are left alone.\n\nBefore you continue, move the shutter to mid-travel and keep its original remote at hand.\n\nOnce you submit, you have {seconds} seconds to:\n\n1. Press down, and wait for the shutter to reach the bottom.\n2. Press up, and let about two slats appear.\n3. Press stop.\n4. Press down again, and wait for the bottom.\n\nThe shutter should answer with a short back-and-forth. Then leave it alone until the time is up. Home Assistant then moves it up, then down, briefly, and asks you whether it moved.",
         "title": "[%key:component::neosol::options::step::init::menu_options::unpair%]"
       },
       "unpair_check": {
