@@ -1,5 +1,7 @@
 """Cover platform for the Profalux Neosol integration."""
 
+from collections.abc import Callable
+from functools import partial
 from typing import Any, override
 
 from pyneosol import Action, NeosolError
@@ -14,7 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import NeosolConfigEntry
+from .coordinator import NeosolConfigEntry, NeosolCoordinator
 from .entity import NeosolEntity
 
 # One serial link, one AT command at a time.
@@ -36,7 +38,8 @@ async def async_setup_entry(
         if new_channels := coordinator.data.keys() - known_channels:
             known_channels.update(new_channels)
             async_add_entities(
-                NeosolCover(coordinator, channel) for channel in sorted(new_channels)
+                NeosolCover(coordinator, channel, known_channels.discard)
+                for channel in sorted(new_channels)
             )
 
     _async_add_new_shutters()
@@ -56,6 +59,24 @@ class NeosolCover(NeosolEntity, CoverEntity):
     _attr_supported_features = (
         CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
     )
+
+    def __init__(
+        self,
+        coordinator: NeosolCoordinator,
+        channel: int,
+        release_channel: Callable[[int], None],
+    ) -> None:
+        """Initialize the shutter, and what to call once it leaves Home Assistant."""
+        super().__init__(coordinator, channel)
+        self._release_channel = release_channel
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Let the platform add this channel again once the shutter is removed."""
+        await super().async_added_to_hass()
+        # An unpaired or forgotten shutter frees its channel, which a later pairing can
+        # reuse: the platform must then see it as new, not as already added.
+        self.async_on_remove(partial(self._release_channel, self.channel))
 
     async def _async_send(self, action: Action) -> None:
         """Transmit ``action`` on this channel."""

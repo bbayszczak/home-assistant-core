@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_DEVICE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from . import MOCK_PORT, MOCK_SERIAL, setup_integration
 from .conftest import CHANNELS
@@ -190,6 +190,33 @@ async def test_pairing_reuses_a_freed_channel(
     assert result["reason"] == "paired"
     assert entry.options[CONF_IGNORED_CHANNELS] == []
     assert hass.states.get("cover.shutter_1") is not None
+
+
+async def test_pairing_brings_back_a_channel_freed_earlier(
+    hass: HomeAssistant,
+    entity_registry: er.EntityRegistry,
+    mock_dongle: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test a shutter paired on a channel unpaired in the same run gets an entity again."""
+    await setup_integration(hass, mock_config_entry)
+    result = await _async_run_on_shutter(hass, mock_config_entry, "unpair")
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "unpair_not_moved"}
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get("cover.shutter_1") is None
+
+    result = await _async_run_pairing(hass, mock_config_entry)
+    mock_dongle.register.assert_awaited_once_with(1)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "pair_moved"}
+    )
+    await hass.async_block_till_done()
+
+    entity_id = entity_registry.async_get_entity_id("cover", DOMAIN, f"{MOCK_SERIAL}_1")
+    assert entity_id
+    assert hass.states.get(entity_id)
 
 
 async def test_pairing_without_a_free_channel(
